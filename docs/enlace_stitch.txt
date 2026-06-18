@@ -1,0 +1,19 @@
+Proyecto: Huerto Vivo
+Caso: Huerto Herido
+
+Enlace al prototipo en Stitch:
+https://stitch.withgoogle.com/projects/10275876614058107481
+
+Pantallas incluidas:
+- Login
+- Inicio Coordinadora
+- Inicio Vecino
+- Mi Parcela
+- Registrar Actividad
+- Comunidad
+- Notificaciones
+- Ajustes
+- Gestión del Huerto
+
+Nota:
+El prototipo representa la solución visual de la app Huerto Vivo para la gestión del huerto urbano comunitario.
