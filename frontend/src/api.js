@@ -1,4 +1,4 @@
-const BASE_URL = 'http://localhost:3001';
+const BASE_URL = import.meta.env.VITE_API_URL || 'https://huerto-vivo-backend.onrender.com';
 
 export const api = {
   login: (correo, contrasena) =>
