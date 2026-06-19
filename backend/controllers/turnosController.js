@@ -50,17 +50,42 @@ const cumplirTurno = async (req, res) => {
   }
 };
 
+// PUT /api/turnos/cumplir-por-parcela
+// Marca como completados TODOS los turnos pendientes de una parcela hasta hoy.
+// Evita duplicados: no importa cuántas filas haya para la misma parcela.
+const cumplirPorParcela = async (req, res) => {
+  const { id_parcela } = req.body;
+  if (!id_parcela) return res.status(400).json({ error: 'id_parcela es requerido' });
+  try {
+    const hoy = new Date().toISOString().split('T')[0];
+    const [result] = await db.query(
+      'UPDATE turnos_riego SET completado = 1 WHERE id_parcela = ? AND completado = 0 AND fecha <= ?',
+      [id_parcela, hoy]
+    );
+    res.json({ mensaje: 'Turnos marcados como completados', afectados: result.affectedRows });
+  } catch (error) {
+    console.error('Error al cumplir turnos por parcela:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
+
 // POST /api/turnos/reiniciar-demo
-// Elimina los turnos de hoy y crea una tanda fresca de turnos pendientes
-// usando las parcelas ocupadas reales de la BD (hasta 9).
+// Limpia atrasos pendientes, elimina turnos de hoy y crea una tanda fresca.
 const reiniciarDemo = async (req, res) => {
   try {
     const hoy = new Date().toISOString().split('T')[0];
 
-    // 1. Borrar todos los turnos del día actual
+    // 1. Marcar como cumplidos los turnos pendientes de días anteriores
+    //    para que no sigan apareciendo como "atrasados" tras el reinicio
+    await db.query(
+      'UPDATE turnos_riego SET completado = 1 WHERE completado = 0 AND fecha < ?',
+      [hoy]
+    );
+
+    // 2. Borrar todos los turnos del día actual
     await db.query('DELETE FROM turnos_riego WHERE fecha = ?', [hoy]);
 
-    // 2. Obtener parcelas ocupadas con su usuario asignado, ordenadas por número
+    // 3. Obtener parcelas ocupadas con su usuario asignado, ordenadas por número
     const [parcelas] = await db.query(
       `SELECT p.id_parcela, p.id_usuario
        FROM parcelas p
@@ -69,7 +94,7 @@ const reiniciarDemo = async (req, res) => {
        LIMIT 9`
     );
 
-    // 3. Insertar un turno pendiente por parcela con horario escalonado
+    // 4. Insertar un turno pendiente por parcela con horario escalonado
     for (let i = 0; i < parcelas.length; i++) {
       const { id_parcela, id_usuario } = parcelas[i];
       const { hora_inicio, hora_fin }  = HORAS_DEMO[i];
@@ -90,4 +115,4 @@ const reiniciarDemo = async (req, res) => {
   }
 };
 
-module.exports = { getTurnos, cumplirTurno, reiniciarDemo };
+module.exports = { getTurnos, cumplirTurno, cumplirPorParcela, reiniciarDemo };

@@ -48,22 +48,31 @@ function parcelaTurno(t) {
 
 // ---- componente principal ----
 export default function HomeAdmin({ usuario, onNavChange }) {
-  const [parcelas,    setParcelas]    = useState([]);
-  const [turnos,      setTurnos]      = useState([]);
-  const [usuarios,    setUsuarios]    = useState([]);
-  const [cosechas,    setCosechas]    = useState([]);
-  const [actividades, setActividades] = useState([]);
-  const [mensajeDemo, setMensajeDemo] = useState('');
-  const [loadingDemo, setLoadingDemo] = useState(false);
+  const [parcelas,       setParcelas]       = useState([]);
+  const [turnos,         setTurnos]         = useState([]);
+  const [usuarios,       setUsuarios]       = useState([]);
+  const [cosechas,       setCosechas]       = useState([]);
+  const [actividades,    setActividades]    = useState([]);
+  const [mensajeDemo,    setMensajeDemo]    = useState('');
+  const [loadingDemo,    setLoadingDemo]    = useState(false);
+  const [verTodosTurnos, setVerTodosTurnos] = useState(false);
 
   const cargarTurnos = () => api.getTurnos().then(setTurnos).catch(() => {});
 
   useEffect(() => {
-    api.getParcelas().then(setParcelas).catch(() => {});
-    cargarTurnos();
-    api.getUsuarios().then(setUsuarios).catch(() => {});
-    api.getCosechas().then(setCosechas).catch(() => {});
-    api.getActividades().then(setActividades).catch(() => {});
+    Promise.all([
+      api.getParcelas(),
+      api.getTurnos(),
+      api.getUsuarios(),
+      api.getCosechas(),
+      api.getActividades(),
+    ]).then(([parc, turn, usu, cos, acts]) => {
+      setParcelas(parc);
+      setTurnos(turn);
+      setUsuarios(usu);
+      setCosechas(cos);
+      setActividades(acts);
+    }).catch(() => {});
   }, []);
 
   const handleReiniciarDemo = async () => {
@@ -83,23 +92,43 @@ export default function HomeAdmin({ usuario, onNavChange }) {
 
   const hoy = new Date().toISOString().split('T')[0];
 
-  // ── turnos de hoy ──
-  const turnosHoy = turnos.filter(t => t.fecha?.startsWith(hoy));
+  // ── actividades de hoy ──
+  const actividadesHoy = actividades.filter(a => fn(a.fecha) === hoy);
 
-  // ── alertas urgentes ──
-  const turnosPendientesHoy = turnosHoy.filter(t => !t.completado);
-  const turnosAtrasados     = turnos.filter(t => !t.completado && fn(t.fecha) < hoy);
+  // ── turnos de hoy (raw) — para "Regadas hoy" y "Sin riego programado" ──
+  const turnosHoyRaw   = turnos.filter(t => fn(t.fecha) === hoy);
+  const regadasHoy     = turnosHoyRaw.filter(t => t.completado).length;
+  const sinRiegoProgramado = TOTAL_VECINOS - turnosHoyRaw.length;
 
-  // ── stats de parcelas (solo HOY — mismo universo que la lista de detalle) ──
-  const regadasHoy         = turnosHoy.filter(t => t.completado).length;
-  const pendientesRiegoHoy = turnosPendientesHoy.length;
-  const sinRiegoProgramado = TOTAL_VECINOS - turnosHoy.length;
+  // ── pendientes únicos por parcela (evita duplicados de la misma parcela) ──
+  // Tomamos el más antiguo por parcela para priorizar los atrasados
+  const seenParcelas = new Set();
+  const turnosPendientesUnicos = turnos
+    .filter(t => !t.completado && fn(t.fecha) <= hoy)
+    .sort((a, b) => fn(a.fecha).localeCompare(fn(b.fecha)))
+    .filter(t => {
+      const key = t.parcela || t.vecino;
+      if (seenParcelas.has(key)) return false;
+      seenParcelas.add(key);
+      return true;
+    });
 
-  // ── lista de detalle: solo turnos de HOY, pendientes primero por hora ──
+  const turnosAtrasados     = turnosPendientesUnicos.filter(t => fn(t.fecha) < hoy);
+  const turnosPendientesHoy = turnosPendientesUnicos.filter(t => fn(t.fecha) === hoy);
+  const pendientesRiegoHoy  = turnosPendientesUnicos.length;
+
+  // ── lista de detalle: atrasados primero (por fecha asc), luego pendientes de hoy (por hora) ──
   const turnosDeHoy = [
+    ...turnosAtrasados,
     ...turnosPendientesHoy.sort((a, b) => (a.hora_inicio || '').localeCompare(b.hora_inicio || '')),
-    ...turnosHoy.filter(t => t.completado).sort((a, b) => (a.hora_inicio || '').localeCompare(b.hora_inicio || '')),
   ];
+
+  const LIMITE_TURNOS = 4;
+  const turnosVisibles = verTodosTurnos ? turnosDeHoy : turnosDeHoy.slice(0, LIMITE_TURNOS);
+
+  // ── alertas "Urgente hoy": atrasados primero, luego pendientes de hoy ──
+  const urgentesTotal   = [...turnosAtrasados, ...turnosPendientesHoy];
+  const urgentesExtra   = Math.max(0, urgentesTotal.length - 3);
 
   // ── cosechas agrupadas por cultivo ──
   const cosechasPorCultivo = cosechas.reduce((acc, c) => {
@@ -126,8 +155,14 @@ export default function HomeAdmin({ usuario, onNavChange }) {
     .sort(([, a], [, b]) => b - a)
     .slice(0, 3);
 
-  const turnosCumplidos = turnos.filter(t => t.completado).length;
-  const vecnosConAtraso = [...new Set(turnosAtrasados.map(t => t.vecino))];
+  const turnosCumplidos  = turnos.filter(t => t.completado).length;
+  const vecnosConAtraso  = turnosAtrasados.map(t => t.vecino); // ya deduplicado por parcela
+  const requiereAtencion = turnosPendientesUnicos.length > 0;
+
+  // ── reparto de cosecha calculado desde totalKg real ──
+  const repartidoKg = totalKg > 0 ? Math.round(totalKg * 0.70 * 10) / 10 : 0;
+  const reservaKg   = totalKg > 0 ? Math.round(totalKg * 0.20 * 10) / 10 : 0;
+  const pendienteKg = totalKg > 0 ? Math.round((totalKg - repartidoKg - reservaKg) * 10) / 10 : 0;
 
   return (
     <div className="screen p-16">
@@ -144,7 +179,9 @@ export default function HomeAdmin({ usuario, onNavChange }) {
       <Card>
         <div className="flex-between mb-8">
           <span style={{ fontWeight: 700 }}>Estado general del huerto</span>
-          <span className="badge badge-orange">Requiere atención</span>
+          <span className={`badge ${requiereAtencion ? 'badge-orange' : 'badge-green'}`}>
+            {requiereAtencion ? 'Requiere atención' : 'Todo en orden'}
+          </span>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 6 }}>
           {[
@@ -161,34 +198,59 @@ export default function HomeAdmin({ usuario, onNavChange }) {
               <span style={{ fontSize: '0.68rem', color, opacity: 0.85, lineHeight: 1.3, display: 'block', marginTop: 2 }}>{label}</span>
             </div>
           ))}
+          {/* Actividades hoy — fila completa */}
+          <div style={{
+            gridColumn: '1 / -1',
+            background: '#EBF2FB', borderRadius: 10,
+            padding: '10px 14px',
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          }}>
+            <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--azul)' }}>
+              Actividades registradas hoy
+            </span>
+            <span style={{ fontWeight: 800, fontSize: '1.3rem', color: 'var(--azul)', lineHeight: 1 }}>
+              {actividadesHoy.length}
+            </span>
+          </div>
         </div>
       </Card>
 
       {/* ── 2. Urgente hoy ── */}
       <p className="section-title" style={{ marginTop: 4 }}>Urgente hoy</p>
 
-      {/* Atrasados = alerta roja; si no hay, confirmar que todo está bajo control */}
-      {turnosAtrasados.length > 0 ? (
-        turnosAtrasados.slice(0, 3).map(t => (
-          <div key={t.id_turno} className="alert-item alert-riego">
-            <span className="alert-ico"><IcoAlert size={14} /></span>
-            <span>Turno atrasado — {t.vecino} ({parcelaTurno(t)})</span>
-          </div>
-        ))
-      ) : (
+      {urgentesTotal.length === 0 ? (
         <div className="alert-item alert-siembra">
           <span className="alert-ico"><IcoCheckCircle size={14} /></span>
           <span>Sin alertas urgentes para hoy</span>
         </div>
+      ) : (
+        <>
+          {urgentesTotal.slice(0, 3).map(t => {
+            const esAtrasado = fn(t.fecha) < hoy;
+            return (
+              <div
+                key={t.id_turno}
+                className={`alert-item ${esAtrasado ? 'alert-riego' : 'alert-warning'}`}
+              >
+                <span className="alert-ico"><IcoAlert size={14} /></span>
+                <span>
+                  {esAtrasado
+                    ? `Turno atrasado — ${t.vecino} (${parcelaTurno(t)})`
+                    : `${t.vecino} tiene riego pendiente hoy (${parcelaTurno(t)})`}
+                </span>
+              </div>
+            );
+          })}
+          {urgentesExtra > 0 && (
+            <p style={{
+              fontSize: '0.78rem', color: '#e65100',
+              margin: '2px 0 6px', paddingLeft: 4,
+            }}>
+              + {urgentesExtra} alerta{urgentesExtra !== 1 ? 's' : ''} más
+            </p>
+          )}
+        </>
       )}
-
-      {/* Pendientes de hoy = advertencia amarilla */}
-      {turnosPendientesHoy.slice(0, 3).map(t => (
-        <div key={t.id_turno} className="alert-item alert-warning" style={{ marginBottom: 0 }}>
-          <span className="alert-ico"><IcoAlert size={14} /></span>
-          <span>{t.vecino} tiene turno de riego pendiente hoy ({parcelaTurno(t)})</span>
-        </div>
-      ))}
 
       {/* ── 3. Turnos de riego ── prioridad: Atrasados → Pendientes hoy → Cumplidos hoy → Futuros */}
       <Card style={{ marginTop: 12 }}>
@@ -198,7 +260,7 @@ export default function HomeAdmin({ usuario, onNavChange }) {
           <div>
             <p style={{ fontWeight: 700 }}>Turnos de riego</p>
             <p style={{ fontSize: '0.72rem', color: '#888', marginTop: 2 }}>
-              Parcelas con riego programado para hoy
+              Turnos pendientes y atrasados
             </p>
           </div>
           <button
@@ -227,29 +289,47 @@ export default function HomeAdmin({ usuario, onNavChange }) {
           </p>
         )}
 
-        {/* lista de detalle — solo parcelas programadas hoy */}
-        {turnosHoy.length === 0 ? (
+        {/* lista de detalle — atrasados + pendientes de hoy (máx 4 por defecto) */}
+        {turnosDeHoy.length === 0 ? (
           <p style={{
             fontSize: '0.85rem', color: '#757575',
             background: '#f5f5f5', borderRadius: 8,
             padding: '10px 12px', textAlign: 'center',
           }}>
-            No hay riego programado para hoy.
+            Todos los turnos de riego están al día.
           </p>
         ) : (
-          turnosDeHoy.map(t => {
-            const { label, clase } = estadoTurno(t, hoy);
-            return (
-              <div key={t.id_turno} className="list-item">
-                <p style={{ fontSize: '0.86rem', flex: 1, color: '#212121' }}>
-                  <span style={{ fontWeight: 700 }}>{parcelaTurno(t)}</span>
-                  {' — '}{t.vecino}
-                  {' — '}{t.hora_inicio?.slice(0, 5) || '—'}
-                </p>
-                <span className={`badge ${clase}`}>{label}</span>
-              </div>
-            );
-          })
+          <>
+            {turnosVisibles.map(t => {
+              const { label, clase } = estadoTurno(t, hoy);
+              return (
+                <div key={t.id_turno} className="list-item">
+                  <p style={{ fontSize: '0.86rem', flex: 1, color: '#212121' }}>
+                    <span style={{ fontWeight: 700 }}>{parcelaTurno(t)}</span>
+                    {' — '}{t.vecino}
+                    {' — '}{t.hora_inicio?.slice(0, 5) || '—'}
+                  </p>
+                  <span className={`badge ${clase}`}>{label}</span>
+                </div>
+              );
+            })}
+            {turnosDeHoy.length > LIMITE_TURNOS && (
+              <button
+                onClick={() => setVerTodosTurnos(v => !v)}
+                style={{
+                  width: '100%', marginTop: 6,
+                  background: 'none', border: '1px solid var(--borde)',
+                  borderRadius: 8, padding: '7px 0',
+                  fontSize: '0.78rem', color: 'var(--texto-sec)',
+                  cursor: 'pointer', fontWeight: 600,
+                }}
+              >
+                {verTodosTurnos
+                  ? 'Ocultar'
+                  : `Ver todos (${turnosDeHoy.length})`}
+              </button>
+            )}
+          </>
         )}
       </Card>
 
@@ -312,9 +392,9 @@ export default function HomeAdmin({ usuario, onNavChange }) {
           </p>
 
           {[
-            { label: 'Repartido entre vecinos', kg: 4.5,  color: '#388e3c', bg: '#e8f5e9' },
-            { label: 'Reserva comunitaria',      kg: 1.2,  color: '#1565c0', bg: '#e3f2fd' },
-            { label: 'Pendiente de reparto',     kg: 0.6,  color: '#e65100', bg: '#fff3e0' },
+            { label: 'Repartido entre vecinos', kg: repartidoKg, color: '#388e3c', bg: '#e8f5e9' },
+            { label: 'Reserva comunitaria',      kg: reservaKg,   color: '#1565c0', bg: '#e3f2fd' },
+            { label: 'Pendiente de reparto',     kg: pendienteKg, color: '#e65100', bg: '#fff3e0' },
           ].map(({ label, kg, color, bg }) => (
             <div key={label} style={{
               display: 'flex', alignItems: 'center',

@@ -23,24 +23,39 @@ const getCosechas = async (req, res) => {
 };
 
 // POST /api/cosechas
-// Registra una nueva cosecha y actualiza el estado de la siembra a 'cosechado'
+// Recibe id_cultivo + id_parcela (no id_siembra).
+// Resuelve internamente el FK a siembras: busca una siembra existente para esa
+// parcela+cultivo o crea una nueva de referencia para no romper la integridad referencial.
 const createCosecha = async (req, res) => {
-  const { id_siembra, id_usuario, fecha, cantidad_kg, notas } = req.body;
+  const { id_cultivo, id_parcela, id_usuario, fecha, cantidad_kg, notas } = req.body;
 
-  if (!id_siembra || !id_usuario || !fecha) {
-    return res.status(400).json({ error: 'id_siembra, id_usuario y fecha son requeridos' });
+  if (!id_cultivo || !id_parcela || !id_usuario || !fecha) {
+    return res.status(400).json({ error: 'id_cultivo, id_parcela, id_usuario y fecha son requeridos' });
   }
 
   try {
+    // Buscar siembra existente para esta parcela + cultivo
+    const [siembrasExistentes] = await db.query(
+      'SELECT id_siembra FROM siembras WHERE id_parcela = ? AND id_cultivo = ? LIMIT 1',
+      [id_parcela, id_cultivo]
+    );
+
+    let id_siembra;
+    if (siembrasExistentes.length > 0) {
+      id_siembra = siembrasExistentes[0].id_siembra;
+    } else {
+      // Crear siembra de referencia para mantener integridad referencial
+      const [nuevaSiembra] = await db.query(
+        `INSERT INTO siembras (id_parcela, id_cultivo, id_usuario, fecha_siembra, estado)
+         VALUES (?, ?, ?, ?, 'cosechado')`,
+        [id_parcela, id_cultivo, id_usuario, fecha]
+      );
+      id_siembra = nuevaSiembra.insertId;
+    }
+
     const [result] = await db.query(
       'INSERT INTO cosechas (id_siembra, id_usuario, fecha, cantidad_kg, notas) VALUES (?, ?, ?, ?, ?)',
       [id_siembra, id_usuario, fecha, cantidad_kg || null, notas || null]
-    );
-
-    // Actualiza el estado de la siembra a cosechado
-    await db.query(
-      "UPDATE siembras SET estado = 'cosechado' WHERE id_siembra = ?",
-      [id_siembra]
     );
 
     res.status(201).json({

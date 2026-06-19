@@ -21,8 +21,6 @@ export default function RegistrarActividad({ usuario, onNavChange, initialTab = 
   const [tab,       setTab]       = useState(initialTab);
   const [parcelas,  setParcelas]  = useState([]);
   const [cultivos,  setCultivos]  = useState([]);
-  const [siembras,  setSiembras]  = useState([]);
-  const [turnos,    setTurnos]    = useState([]);
 
   // Campos comunes
   const [idParcela,  setIdParcela]  = useState('');
@@ -49,15 +47,8 @@ export default function RegistrarActividad({ usuario, onNavChange, initialTab = 
       }
     }).catch(() => {});
     api.getCultivos().then(setCultivos).catch(() => {});
-    api.getTurnos().then(setTurnos).catch(() => {});
   }, [usuario, esAdmin]);
 
-  // Carga siembras cuando cambia la parcela (para cosecha)
-  useEffect(() => {
-    if (tab === 'cosecha' && idParcela) {
-      api.getCosechas().then(() => {}).catch(() => {});
-    }
-  }, [tab, idParcela]);
 
   const guardar = async (e) => {
     e.preventDefault();
@@ -68,15 +59,21 @@ export default function RegistrarActividad({ usuario, onNavChange, initialTab = 
     try {
       if (tab === 'cosecha') {
         if (!idSiembra || !fecha) {
-          setErrorMsg('Selecciona una siembra y una fecha.');
+          setErrorMsg('Selecciona un cultivo y una fecha.');
+          setLoading(false);
+          return;
+        }
+        if (!cantidadKg || parseFloat(cantidadKg) <= 0) {
+          setErrorMsg('Ingresa la cantidad cosechada en kg.');
           setLoading(false);
           return;
         }
         const data = await api.createCosecha({
-          id_siembra:  parseInt(idSiembra),
+          id_cultivo:  parseInt(idSiembra),   // idSiembra guarda el id_cultivo elegido
+          id_parcela:  parseInt(idParcela),
           id_usuario:  usuario.id_usuario,
           fecha,
-          cantidad_kg: cantidadKg ? parseFloat(cantidadKg) : null,
+          cantidad_kg: parseFloat(cantidadKg),
           notas:       notas || null,
         });
         if (data.error) setErrorMsg(data.error);
@@ -96,16 +93,9 @@ export default function RegistrarActividad({ usuario, onNavChange, initialTab = 
         if (data.error) {
           setErrorMsg(data.error);
         } else {
-          // Si es un riego, marcar el turno pendiente de hoy como cumplido
+          // Marcar como cumplidos TODOS los turnos pendientes de esta parcela hasta hoy
           if (tab === 'riego') {
-            const hoy          = new Date().toISOString().split('T')[0];
-            const parcelaObj   = parcelas.find(p => p.id_parcela === parseInt(idParcela));
-            const turnoHoy     = turnos.find(t =>
-              t.parcela === parcelaObj?.numero &&
-              String(t.fecha).startsWith(hoy) &&
-              !t.completado
-            );
-            if (turnoHoy) await api.cumplirTurno(turnoHoy.id_turno);
+            await api.cumplirPorParcela(parseInt(idParcela)).catch(() => {});
           }
           setMensaje('¡Registro guardado correctamente!');
         }
@@ -170,7 +160,7 @@ export default function RegistrarActividad({ usuario, onNavChange, initialTab = 
           {tab === 'cosecha' ? (
             <>
               <div className="form-group">
-                <label>Tipo de cultivo</label>
+                <label>Cultivo cosechado</label>
                 <select
                   className="input"
                   value={idSiembra}
@@ -190,11 +180,12 @@ export default function RegistrarActividad({ usuario, onNavChange, initialTab = 
                 <input
                   className="input"
                   type="number"
-                  min="0"
+                  min="0.01"
                   step="0.01"
                   placeholder="Ej. 2.50"
                   value={cantidadKg}
                   onChange={e => setCantidadKg(e.target.value)}
+                  required
                 />
               </div>
               <div className="form-group">

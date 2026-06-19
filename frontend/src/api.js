@@ -20,11 +20,21 @@ export const api = {
   getCultivos: () =>
     fetch(`${BASE_URL}/api/cultivos`).then(r => r.json()),
 
+  getSiembras: (id_parcela) =>
+    fetch(`${BASE_URL}/api/siembras${id_parcela ? `?id_parcela=${id_parcela}` : ''}`).then(r => r.json()),
+
   getTurnos: () =>
     fetch(`${BASE_URL}/api/turnos`).then(r => r.json()),
 
   cumplirTurno: (id) =>
     fetch(`${BASE_URL}/api/turnos/${id}/cumplir`, { method: 'PUT' }).then(r => r.json()),
+
+  cumplirPorParcela: (id_parcela) =>
+    fetch(`${BASE_URL}/api/turnos/cumplir-por-parcela`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id_parcela }),
+    }).then(r => r.json()),
 
   reiniciarDemo: () =>
     fetch(`${BASE_URL}/api/turnos/reiniciar-demo`, { method: 'POST' }).then(r => r.json()),
