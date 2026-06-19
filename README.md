@@ -54,7 +54,8 @@ Base de datos MySQL en Railway
 - Contraseña: `admin123`
 
 **Vecino**
-- Correo: `juan@huertovivo.cl` (Para ingresar con otro vecino basta con solo cambiar el nombre antes del @)
+- Correo: `juan@huertovivo.cl` 
+Para ingresar como otro vecino, cambia únicamente el nombre antes de `@huertovivo.cl`
 - Contraseña: `vecino123`
 
 ---
